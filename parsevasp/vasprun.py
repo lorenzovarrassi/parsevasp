@@ -3,7 +3,6 @@
 import copy
 import logging
 import os
-import re
 import sys
 from collections import defaultdict
 from typing import Tuple, Union
@@ -147,6 +146,8 @@ class Xml(BaseParser):
             'hessian': None,
             'dynmat': None,
             'born': None,
+            'epsilon_diag': None,      
+            'opticaltransitions': None 
         }
 
         if USE_LXML:
@@ -236,6 +237,8 @@ class Xml(BaseParser):
         self._data['hessian'] = self._fetch_hessian(vaspxml)
         self._data['dynmat'] = self._fetch_dynmatw(vaspxml)
         self._data['born'] = self._fetch_bornw(vaspxml)
+        self._data['epsilon_diag'] = self._fetch_epsilon_diag(vaspxml)              
+        self._data['opticaltransitions'] = self._fetch_opticaltransitions(vaspxml)  
 
     def _parsee(self):
         """
@@ -315,6 +318,9 @@ class Xml(BaseParser):
         extract_dynmat_eigen = False
         extract_hessian = False
         extract_born = False
+        extract_epsilon_diag = False
+        extract_opticaltransition = False
+
 
         # Do we want to extract data from all calculations (e.g. ionic steps)
         # extract_all = self._extract_all
@@ -377,7 +383,7 @@ class Xml(BaseParser):
                         self._version = element.text
                 except KeyError:
                     pass
-            if extract_parameters and event == 'end':
+            if extract_parameters and event == 'start':
                 if element.tag in ['i', 'v']:
                     name, param_value = self._convert_parameter(element)
                     if self._parameters[name] is not None:
@@ -1022,7 +1028,7 @@ class Xml(BaseParser):
 
         """
 
-        entry = self._findall(xml, './/calculation/array[@name="born_charges"]/set/v')
+        entry = self._findall(xml, './/calculation/array[@name="born_charges"]/' 'set/v')
 
         if entry is None:
             return None
@@ -1231,7 +1237,7 @@ class Xml(BaseParser):
 
         """
 
-        entry = self._findall(xml, './/atominfo/array[@name="atoms"]/set/rc/c')
+        entry = self._findall(xml, './/atominfo/' 'array[@name="atoms"]/set/rc/c')
 
         if entry is None:
             return None
@@ -1256,7 +1262,7 @@ class Xml(BaseParser):
 
         """
 
-        entry = self._findall(xml, './/calculation/dynmat/varray[@name="hessian"]/v')
+        entry = self._findall(xml, './/calculation/dynmat/' 'varray[@name="hessian"]/v')
 
         if entry is None:
             return None
@@ -1290,7 +1296,7 @@ class Xml(BaseParser):
 
         """
 
-        entry = self._find(xml, './/calculation/dynmat/v[@name="eigenvalues"]')
+        entry = self._find(xml, './/calculation/dynmat/' 'v[@name="eigenvalues"]')
 
         if entry is None:
             return None
@@ -1306,7 +1312,7 @@ class Xml(BaseParser):
 
         eigenvalues = self._convert_array_f(entry)
 
-        entry = self._find(xml, './/calculation/dynmat/varray[@name="eigenvectors"]')
+        entry = self._find(xml, './/calculation/dynmat/' 'varray[@name="eigenvectors"]')
 
         if entry is None:
             return None
@@ -1398,6 +1404,41 @@ class Xml(BaseParser):
 
         return kpointdiv
 
+    def _fetch_opticaltransitions(self, xml):  
+        """
+        WORK IN PROGRESS by VARRASSI - TODO complete help.
+        """
+
+        entry = self._findall(xml, './/varray[@name="opticaltransitions"]/v')
+
+        # If we do not find spin entries return right away
+        if entry is None:
+            return None
+
+        _opticaltransitions = np.asarray(self._convert_array2D_f(entry, 2))
+        opticaltransitions = {}
+        opticaltransitions['energy'] = _opticaltransitions[:,0]
+        opticaltransitions['osc_strength'] = _opticaltransitions[:,1]
+        return opticaltransitions
+
+    def _fetch_epsilon_diag(self, xml):  
+        """
+        WORK IN PROGRESS by VARRASSI - TODO complete help.
+        """
+
+        entry = self._findall(xml, './/varray[@name="epsilon_diag"]/v')
+
+        # If we do not find spin entries return right away
+        if entry is None:
+            return None
+
+        _epsilon_diag = np.asarray(self._convert_array2D_f(entry, 2))
+        epsilon_diag = {}
+        epsilon_diag['energy'] = _epsilon_diag[:,0]
+        epsilon_diag['inverse_epsilon_diag'] = _epsilon_diag[:,1]
+        return epsilon_diag
+
+
     def _fetch_eigenvaluesw(self, xml):
         """
         Fetch the eigenvalues using etree.
@@ -1417,10 +1458,10 @@ class Xml(BaseParser):
         """
 
         # Spin 1
-        entry_ispin1 = self._findall(xml, './/calculation/eigenvalues/array/set/set[@comment="spin 1"]/set/r')
+        entry_ispin1 = self._findall(xml, './/calculation/eigenvalues/array/set/' 'set[@comment="spin 1"]/set/r')
 
         # Spin 2
-        entry_ispin2 = self._findall(xml, './/calculation/eigenvalues/array/set/set[@comment="spin 2"]/set/r')
+        entry_ispin2 = self._findall(xml, './/calculation/eigenvalues/array/set/' 'set[@comment="spin 2"]/set/r')
 
         # If we do not find spin 1 entries return right away
         if entry_ispin1 is None:
@@ -1450,20 +1491,20 @@ class Xml(BaseParser):
 
         # Spin 1
         entry_ispin1 = self._findall(
-            xml, './/calculation/eigenvalues/eigenvalues/array/set/set[@comment="spin 1"]/set/r'
+            xml, './/calculation/eigenvalues/' 'eigenvalues/array/set/' 'set[@comment="spin 1"]/set/r'
         )
         # Spin 2
         entry_ispin2 = self._findall(
-            xml, './/calculation/eigenvalues/eigenvalues/array/set/set[@comment="spin 2"]/set/r'
+            xml, './/calculation/eigenvalues/' 'eigenvalues/array/set/' 'set[@comment="spin 2"]/set/r'
         )
         if entry_ispin1 is not None:
             # Also extract the k-point grids
             self._data['kpoints'] = self._fetch_kpointsw(
-                xml, path='.//calculation/eigenvalues/kpoints/varray[@name="kpointlist"]/v'
+                xml, path='.//calculation/eigenvalues/' 'kpoints/varray[@name="kpointlist"]/v'
             )
 
             self._data['kpointsw'] = self._fetch_kpointsww(
-                xml, path='.//calculation/eigenvalues/kpoints/varray[@name="weights"]/v'
+                xml, path='//calculation/eigenvalues/' 'kpoints/varray[@name="weights"]/v'
             )
 
         # If we do not find spin 1 entries return right away
@@ -1497,12 +1538,12 @@ class Xml(BaseParser):
 
         # Spin 1
         entry_ispin1 = self._findall(
-            xml, './/calculation/eigenvelocities/eigenvalues/array/set/set[@comment="spin 1"]/set/r'
+            xml, './/calculation/eigenvelocities/' 'eigenvalues/array/set/' 'set[@comment="spin 1"]/set/r'
         )
 
         # Spin 2
         entry_ispin2 = self._findall(
-            xml, './/calculation/eigenvelocities/eigenvalues/array/set/set[@comment="spin 2"]/set/r'
+            xml, './/calculation/eigenvelocities/' 'eigenvalues/array/set/' 'set[@comment="spin 2"]/set/r'
         )
 
         # If we do not find spin 1 entries return right away
@@ -1510,11 +1551,11 @@ class Xml(BaseParser):
             return None
 
         self._data['kpoints'] = self._fetch_kpointsw(
-            xml, path='.//calculation/eigenvelocities/kpoints/varray[@name="kpointlist"]/v'
+            xml, path='.//calculation/eigenvelocities/' 'kpoints/varray[@name="kpointlist"]/v'
         )
 
         self._data['kpointsw'] = self._fetch_kpointsww(
-            xml, path='.//calculation/eigenvelocities/kpoints/varray[@name="weights"]/v'
+            xml, path='//calculation/eigenvelocities/' 'kpoints/varray[@name="weights"]/v'
         )
 
         eigenvelocities = self._extract_eigenvelocities(entry_ispin1, entry_ispin2, len(self._data['kpoints']))
@@ -1539,10 +1580,10 @@ class Xml(BaseParser):
         """
 
         # Projectors spin 1
-        entry_ispin1 = self._findall(xml, './/calculation/projected/array/set/set[@comment="spin1"]/set/set/r')
+        entry_ispin1 = self._findall(xml, './/calculation/projected/array/set/' 'set[@comment="spin1"]/set/set/r')
 
         # Projectors spin 2
-        entry_ispin2 = self._findall(xml, './/calculation/projected/array/set/set[@comment="spin2"]/set/set/r')
+        entry_ispin2 = self._findall(xml, './/calculation/projected/array/set/' 'set[@comment="spin2"]/set/set/r')
 
         # If we do not find spin 1 entries return right away
         if entry_ispin1 is None:
@@ -2314,18 +2355,18 @@ class Xml(BaseParser):
 
         """
 
-        data = []
+        data = None
 
-        if entry is None:
-            return None
+        if entry is not None:
+            data = np.zeros(len(entry), dtype='double')
+        for index, element in enumerate(entry):
+            try:
+                data[index] = np.fromstring(element.text, sep=' ')
+            except ValueError as err:
+                if str(err) == 'setting an array element with a sequence.':
+                    self._logger.error(self.ERROR_MESSAGES[self.ERROR_OVERFLOW])
+                    sys.exit(self.ERROR_OVERFLOW)
 
-        for element in entry:
-            if '*' in element.text:
-                self._logger.error(self.ERROR_MESSAGES[self.ERROR_OVERFLOW])
-                sys.exit(self.ERROR_OVERFLOW)
-            data.append(float(element.text))
-
-        data = np.array(data, dtype=float)
         return data
 
     def _convert_array2D_f(self, entry, dim):
@@ -2354,10 +2395,12 @@ class Xml(BaseParser):
             data = np.zeros((len(entry), dim), dtype='double')
 
         for index, element in enumerate(entry):
-            if '*' in element.text:
-                self._logger.error(self.ERROR_MESSAGES[self.ERROR_OVERFLOW])
-                sys.exit(self.ERROR_OVERFLOW)
-            data[index] = np.fromstring(element.text, sep=' ')
+            try:
+                data[index] = np.fromstring(element.text, sep=' ')
+            except ValueError as err:
+                if str(err) == 'setting an array element with a sequence.':
+                    self._logger.error(self.ERROR_MESSAGES[self.ERROR_OVERFLOW])
+                    sys.exit(self.ERROR_OVERFLOW)
 
         return data
 
@@ -3113,6 +3156,23 @@ class Xml(BaseParser):
         eigenvelocities = self._data['eigenvelocities']
         return eigenvelocities
 
+    def get_epsilon_diag(self):  
+        """
+        WORKINPROGRESS - TODO: complete help description
+        """
+
+        epsilon_diag = self._data['epsilon_diag']
+        return epsilon_diag
+
+    def get_opticaltransitions(self):  
+        """
+        WORKINPROGRESS -  TODO: complete help description
+        """
+
+        opticaltransitions = self._data['opticaltransitions']
+        return opticaltransitions
+
+
     def get_kpoints_specific(self):
         """
         Return the kpoints.
@@ -3208,6 +3268,8 @@ class Xml(BaseParser):
             A string containing the VASP version.
 
         """
+
+        import re
 
         version = self._version.strip()
         # The version entry in the xml file is typically of the form

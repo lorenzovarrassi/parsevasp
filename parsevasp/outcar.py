@@ -43,6 +43,9 @@ class Outcar(BaseParser):
             sys.exit(self.ERROR_USE_ONE_ARGUMENT)
 
         self._data = {
+            'maximum_number_pw' : None,
+            'ENMAXarray' : None,
+            'NGarray' : None,
             'elastic_moduli': {'non-symmetrized': None, 'symmetrized': None, 'total': None},
             'symmetry': {
                 'num_space_group_operations': {'static': [], 'dynamic': []},
@@ -107,6 +110,14 @@ class Outcar(BaseParser):
         finished = False
         iter_counter = None
         nelec_steps = {}
+
+        ENMAXarray = np.array([])
+        NGarray = np.array([]);
+        maximum_number_pw_array = np.array([])
+        index_NG = -1 ; index_NGF = -1
+        flag_ALGO = None
+        flag_isMBPT = False
+
 
         for index, line in enumerate(outcar):
             # Check the iteration counter
@@ -204,8 +215,49 @@ class Outcar(BaseParser):
                 # Only take the last value
                 self._data['magnetization']['full_cell'] = [float(_val) for _val in line.strip().split()[5:]]
 
+            #Extract the array of the number of plane waves per kpts, which could be used to determine its maximum
+            match_pw=re.search(r'maximum number of plane-waves: *(\d+)', line)
+            if match_pw: 
+                maximum_number_pw_array = np.append(maximum_number_pw_array , int(match_pw.group(1)) )  
+
+
+            # Extract NGX, NGY, NGZ which defines the number of points in the FFT grid     #Added by Varrassi
+            match_NG  = re.search(r"dimension x,y,z NGX = *(\d+) NGY = *(\d+) NGZ = *(\d+)", line) 
+            if match_NG:
+                tmp_NGarray = np.array( [ float(match_NG.group(1)) , float(match_NG.group(2)) , float(match_NG.group(3)) ] )
+                index_NG=index                                                     
+            # For some OUTCARs, the regex matchs and extracts more different [NGX,NGY,NGZ]
+            # The one we look for is written in the '" 'Dimension of arrays:' section, right before the dimension x,y,z NGXF line.
+            match_NGF = re.search(r"dimension x,y,z NGXF= *(\d+) NGYF= *(\d+) NGZF= *(\d+)", line)
+            if match_NGF:                    
+                index_NGF=index                                                           
+                if index_NGF==index_NG+1: NGarray = tmp_NGarray
+      
+            #match_ENMAX = re.search(r"ENMAX  = *(\d+)", line) 
+            #if match_ENMAX:
+            if line.strip().startswith("ENMAX"):
+                try:                                                                      
+                    #ENMAXarray = np.append(ENMAXarray , int(match_ENMAX.group(1)) )
+                    ENMAXarray = np.append(ENMAXarray , float( line.strip().split()[2].strip(";") ) )
+                except ValueError: 
+                    ENMAXarray =None                                         
+                    pass  
+
+            if line.strip().startswith('ALGO'):
+                try: #this try because not all lines have a split() with 3 elements
+                    flag_ALGO = line.strip().split()[2]
+                except:
+                    pass
+
+        self._data['maximum_number_pw'] = maximum_number_pw_array
+        self._data['ENMAXarray'] = ENMAXarray
+        self._data['NGarray'] = NGarray
+
+        flag_isMBPT = flag_ALGO in ["CHI","G0W0","GW0","GW","scGW0","scGW","G0W0R","GW0R","GWR","scGW0R","scGWR","ACFDT","RPA","ACFDTR","RPAR","BSE","TDHF"]
+
         # Check if SCF iterations are contained in the file
-        if iter_counter is None:
+        # If the calculation is a MBPT one (GW,BSE,TDHF,RPA,etc), it might not contain any SCF step - thus we skip this check
+        if iter_counter is None and not flag_isMBPT:
             self._logger.error(self.ERROR_MESSAGES[self.ERROR_NO_ITERATIONS])
             sys.exit(self.ERROR_NO_ITERATIONS)
 
@@ -241,23 +293,30 @@ class Outcar(BaseParser):
                 # No ionic relaxation performed
                 run_status['ionic_converged'] = None
 
-            if iter_counter[1] < nelm:
-                # There are fewer number of electronic steps in the last ionic iteration than the set maximum
-                # number of electronic steps, thus the electronic self consistent cycle is considered converged
+            # Check if the electronic steps are converged
+            # If the calculation is a MBPT one (GW,BSE,TDHF,RPA,etc), it might not contain any SCF step - thus we skip this check
+            # In order to avoid modifying all other files, we just set electronic_converged to True in case of MBPT
+            if not flag_isMBPT:
+                if iter_counter[1] < nelm:
+                    # There are fewer number of electronic steps in the last ionic iteration than the set maximum
+                    # number of electronic steps, thus the electronic self consistent cycle is considered converged
+                    run_status['electronic_converged'] = True
+            else:
                 run_status['electronic_converged'] = True
 
-        # Check for consistent electronic convergence problems. VASP will not break when NELM is reached during
-        # the relaxation, it will simply consider it converged. We need to detect this, which is done
-        # by checking if there are any single run that have reached NELM in the history or if NELM
-        # has been consistently reached.
-        mask = [value >= nelm for sc_idx, value in sorted(nelec_steps.items(), key=lambda x: x[0])]
-        if (finished and all(mask)) or (not finished and all(mask[:-1]) and iter_counter[0] > 1):
-            # We have consistently reached NELM. Excluded the last iteration,
-            # as the calculation may not be finished
-            run_status['consistent_nelm_breach'] = True
-        if any(mask):
-            # We have at least one ionic step where NELM was reached.
-            run_status['contains_nelm_breach'] = True
+        if not flag_isMBPT:
+            # Check for consistent electronic convergence problems. VASP will not break when NELM is reached during
+            # the relaxation, it will simply consider it converged. We need to detect this, which is done
+            # by checking if there are any single run that have reached NELM in the history or if NELM
+            # has been consistently reached.
+            mask = [value >= nelm for sc_idx, value in sorted(nelec_steps.items(), key=lambda x: x[0])]
+            if (finished and all(mask)) or (not finished and all(mask[:-1]) and iter_counter[0] > 1):
+                # We have consistently reached NELM. Excluded the last iteration,
+                # as the calculation may not be finished
+                run_status['consistent_nelm_breach'] = True
+            if any(mask):
+                # We have at least one ionic step where NELM was reached.
+                run_status['contains_nelm_breach'] = True
 
         self._data['run_stats'] = self._parse_timings_memory(outcar[-50:])
 
@@ -367,6 +426,20 @@ class Outcar(BaseParser):
 
         status = self._data['run_status']
         return status
+
+
+    def get_maximum_number_pw(self):                            
+        maximum_number_pw = self._data['maximum_number_pw']     
+        return maximum_number_pw                                
+
+    def get_NGarray(self):                                      
+        NGarray = self._data['NGarray']              
+        return NGarray                                          
+
+    def get_ENMAXarray(self):                                   
+        ENMAXarray = self._data['ENMAXarray']     
+        return ENMAXarray     
+
 
     @staticmethod
     def _parse_timings_memory(timing_lines):
