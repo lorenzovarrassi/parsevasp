@@ -297,9 +297,11 @@ class Outcar(BaseParser):
             # If the calculation is a MBPT one (GW,BSE,TDHF,RPA,etc), it might not contain any SCF step - thus we skip this check
             # In order to avoid modifying all other files, we just set electronic_converged to True in case of MBPT
             if not flag_isMBPT:
-                if iter_counter[1] < nelm:
+                if (nelm == 1) or (iter_counter[1] < nelm):
                     # There are fewer number of electronic steps in the last ionic iteration than the set maximum
                     # number of electronic steps, thus the electronic self consistent cycle is considered converged
+                    # The nelm==1 case considers case as the intermediate DFT calculation for a G0W0, where things like ALGO=Exact;NELM=1;LOPTICS=.TRUE. are done
+                    # or processing cases as NELM=1;ALGO=None;LORBIT=11 or similar
                     run_status['electronic_converged'] = True
             else:
                 run_status['electronic_converged'] = True
