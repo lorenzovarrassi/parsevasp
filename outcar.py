@@ -116,7 +116,7 @@ class Outcar(BaseParser):
         maximum_number_pw_array = np.array([])
         index_NG = -1 ; index_NGF = -1
         flag_ALGO = None
-        flag_is_run_MBPT = False
+        flag_isMBPT = False
 
 
         for index, line in enumerate(outcar):
@@ -253,11 +253,11 @@ class Outcar(BaseParser):
         self._data['ENMAXarray'] = ENMAXarray
         self._data['NGarray'] = NGarray
 
-        flag_is_run_MBPT = flag_ALGO in ["CHI","EVGW0","EVGW","G0W0","GW0","GW","scGW0","scGW","G0W0R","GW0R","GWR","scGW0R","scGWR","ACFDT","RPA","ACFDTR","RPAR","BSE","TDHF"]
+        flag_isMBPT = flag_ALGO in ["CHI","G0W0","GW0","GW","scGW0","scGW","G0W0R","GW0R","GWR","scGW0R","scGWR","ACFDT","RPA","ACFDTR","RPAR","BSE","TDHF"]
 
         # Check if SCF iterations are contained in the file
         # If the calculation is a MBPT one (GW,BSE,TDHF,RPA,etc), it might not contain any SCF step - thus we skip this check
-        if iter_counter is None and not flag_is_run_MBPT:
+        if iter_counter is None and not flag_isMBPT:
             self._logger.error(self.ERROR_MESSAGES[self.ERROR_NO_ITERATIONS])
             sys.exit(self.ERROR_NO_ITERATIONS)
 
@@ -296,40 +296,30 @@ class Outcar(BaseParser):
             # Check if the electronic steps are converged
             # If the calculation is a MBPT one (GW,BSE,TDHF,RPA,etc), it might not contain any SCF step - thus we skip this check
             # In order to avoid modifying all other files, we just set electronic_converged to True in case of MBPT
-            if flag_is_run_MBPT:
-                run_status['electronic_converged'] = True
-            else:
-                #Here we perform several checks on the number of electronic steps and compare it with NELM
-                #in order to determine if the electronic convergence is effectively achieved or if it stopped for NELM=1.
-
-                if nelm == 1:
-                    # NELM==1 run represent a fringe case; they are used for postprocessing (Algo=None) or intermediate steps in MBPT runs.
-                    # The below check with mask = [etc] would give error, but it represents a non-meaningful check; therefore we skip.
-                    run_status['electronic_converged']   = True
-                
-                elif iter_counter[1] < nelm:
-                    # iter_counter has shape [#ionic steps, #electronic steps in last ionic step]
+            if not flag_isMBPT:
+                if (nelm==1) or (iter_counter[1] < nelm):
                     # There are fewer number of electronic steps in the last ionic iteration than the set maximum
-                    # number of electronic steps , thus the electronic self consistent cycle is considered converged.
-                    # There is a fringe case, i.e. when the run is actually converged in the last step = NELM, but this is not considered.
+                    # number of electronic steps, thus the electronic self consistent cycle is considered converged
+                    # The nelm==1 case considers case as the intermediate DFT calculation for a G0W0, where things like ALGO=Exact;NELM=1;LOPTICS=.TRUE. are done
+                    # or processing cases as NELM=1;ALGO=None;LORBIT=11 or similar
                     run_status['electronic_converged'] = True
+            else:
+                run_status['electronic_converged'] = True
 
-                else:
-                    # Check for consistent electronic convergence problems. VASP will not break when NELM is reached during
-                    # the relaxation, it will simply consider it converged. We need to detect this, which is done
-                    # by checking if there are any single run that have reached NELM in the history or if NELM
-                    # has been consistently reached.
-                    mask = [value >= nelm for sc_idx, value in sorted(nelec_steps.items(), key=lambda x: x[0])]
-                    if (finished and all(mask)) or (not finished and all(mask[:-1]) and iter_counter[0] > 1):
-                        # We have consistently reached NELM. Excluded the last iteration,
-                        # as the calculation may not be finished
-                        run_status['consistent_nelm_breach'] = True
-                    if any(mask):
-                        # We have at least one ionic step where NELM was reached.
-                        run_status['contains_nelm_breach'] = True
-                    #We do not change run_status['electronic_converged'] here, it remains False as set in the beginning.
+        if not flag_isMBPT:
+            # Check for consistent electronic convergence problems. VASP will not break when NELM is reached during
+            # the relaxation, it will simply consider it converged. We need to detect this, which is done
+            # by checking if there are any single run that have reached NELM in the history or if NELM
+            # has been consistently reached.
+            mask = [value >= nelm for sc_idx, value in sorted(nelec_steps.items(), key=lambda x: x[0])]
+            if (finished and all(mask)) or (not finished and all(mask[:-1]) and iter_counter[0] > 1):
+                # We have consistently reached NELM. Excluded the last iteration,
+                # as the calculation may not be finished
+                run_status['consistent_nelm_breach'] = True
+            if any(mask):
+                # We have at least one ionic step where NELM was reached.
+                run_status['contains_nelm_breach'] = True
 
-        # Extract timing information from last lines of OUTCAR
         self._data['run_stats'] = self._parse_timings_memory(outcar[-50:])
 
     def get_symmetry(self):
