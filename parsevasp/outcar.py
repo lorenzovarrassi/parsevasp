@@ -253,7 +253,7 @@ class Outcar(BaseParser):
         self._data['ENMAXarray'] = ENMAXarray
         self._data['NGarray'] = NGarray
 
-        flag_isMBPT = flag_ALGO in ["CHI","G0W0","GW0","GW","scGW0","scGW","G0W0R","GW0R","GWR","scGW0R","scGWR","ACFDT","RPA","ACFDTR","RPAR","BSE","TDHF"]
+        flag_isMBPT = flag_ALGO in ["CHI",'EVGW0','EVGW',"G0W0","GW0","GW","scGW0","scGW","G0W0R","GW0R","GWR","scGW0R","scGWR","ACFDT","RPA","ACFDTR","RPAR","BSE","TDHF"]
 
         # Check if SCF iterations are contained in the file
         # If the calculation is a MBPT one (GW,BSE,TDHF,RPA,etc), it might not contain any SCF step - thus we skip this check
@@ -297,7 +297,7 @@ class Outcar(BaseParser):
             # If the calculation is a MBPT one (GW,BSE,TDHF,RPA,etc), it might not contain any SCF step - thus we skip this check
             # In order to avoid modifying all other files, we just set electronic_converged to True in case of MBPT
             if not flag_isMBPT:
-                if (nelm == 1) or (iter_counter[1] < nelm):
+                if (nelm==1) or (iter_counter[1] < nelm):
                     # There are fewer number of electronic steps in the last ionic iteration than the set maximum
                     # number of electronic steps, thus the electronic self consistent cycle is considered converged
                     # The nelm==1 case considers case as the intermediate DFT calculation for a G0W0, where things like ALGO=Exact;NELM=1;LOPTICS=.TRUE. are done
